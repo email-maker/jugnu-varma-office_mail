@@ -15,7 +15,7 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
-/* ===== CONFIG (DO NOT CHANGE SPEED) ===== */
+/* ===== CONFIG (SAME RATE, SAFE) ===== */
 const HOURLY_LIMIT = 28;
 const PARALLEL = 3;     // SAME
 const DELAY_MS = 120;  // SAME
@@ -23,15 +23,13 @@ const DELAY_MS = 120;  // SAME
 /* IN-MEMORY STATS */
 let stats = {};
 
-/* 🔁 HARD RESET EVERY 1 HOUR (FULL CLEAR) */
+/* 🔁 HARD RESET EVERY 1 HOUR */
 setInterval(() => {
   stats = {};
   console.log("🧹 Hourly reset → stats cleared");
 }, 60 * 60 * 1000);
 
-/* ===== ULTRA-SAFE CONTENT HELPERS ===== */
-
-/* Subject: spacing & punctuation normalize only */
+/* ===== CONTENT SAFETY ===== */
 function normalizeSubject(s) {
   return s
     .replace(/\s{2,}/g, " ")
@@ -39,35 +37,41 @@ function normalizeSubject(s) {
     .trim();
 }
 
-/* Body: normalize + soften keyword-only lines (report/price) */
 function normalizeBody(text) {
   let t = text
     .replace(/\r\n/g, "\n")
     .replace(/\s{3,}/g, "\n\n")
     .trim();
 
+  // soften keyword-only lines (report/price)
   const soften = [
     ["report", "the report details are shared below"],
     ["price", "the pricing details are included below"]
   ];
 
-  soften.forEach(([word, sentence]) => {
-    const re = new RegExp(`(^|\\n)\\s*${word}\\s*(?=\\n|$)`, "gi");
-    t = t.replace(re, `$1${sentence}`);
+  soften.forEach(([w, snt]) => {
+    const re = new RegExp(`(^|\\n)\\s*${w}\\s*(?=\\n|$)`, "gi");
+    t = t.replace(re, `$1${snt}`);
   });
 
   return t;
 }
 
-/* ===== SAFE SEND (SAME SPEED) ===== */
+/* ===== SAFE SEND (SAME RATE) ===== */
 async function sendSafely(transporter, mails) {
   let sent = 0;
+
   for (let i = 0; i < mails.length; i += PARALLEL) {
     const batch = mails.slice(i, i + PARALLEL);
+
     const results = await Promise.allSettled(
       batch.map(m => transporter.sendMail(m))
     );
-    results.forEach(r => { if (r.status === "fulfilled") sent++; });
+
+    results.forEach(r => {
+      if (r.status === "fulfilled") sent++;
+    });
+
     await new Promise(r => setTimeout(r, DELAY_MS));
   }
   return sent;
@@ -109,15 +113,23 @@ app.post("/send", async (req, res) => {
     normalizeBody(message) +
     "\n\nScanned & secured";
 
+  /* ===== FAST BUT SAFE TRANSPORT (POOLING ON) ===== */
   const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
     port: 465,
     secure: true,
-    auth: { user: gmail, pass: apppass }
+
+    // 🔥 SPEED OPTIMIZATION (SAFE)
+    pool: true,                // reuse connections
+    maxConnections: PARALLEL,  // SAME concurrency
+    maxMessages: 50,           // recycle after N messages
+
+    auth: { user: gmail, pass: apppass },
+    tls: { rejectUnauthorized: true }
   });
 
   try {
-    await transporter.verify();
+    await transporter.verify(); // single verify
   } catch {
     return res.json({
       success: false,
@@ -144,6 +156,7 @@ app.post("/send", async (req, res) => {
   });
 });
 
+/* ===== START SERVER ===== */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("✅ Safe Mail Server running on port", PORT);
